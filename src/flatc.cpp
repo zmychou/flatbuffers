@@ -56,6 +56,44 @@ void FlatCompiler::Error(const std::string &err, bool usage,
   params_.error_fn(this, err, usage, show_exe_name);
 }
 
+std::string GetParamsSchema() {
+  std::stringstream ss;
+  ss << "To-Be-Filled";
+  return ss.str();
+}
+
+std::string GetModelSchema() {
+  std::stringstream ss;
+  ss << 
+    "// Example IDL file for our monster's schema.\n"
+    "namespace MyGame.Sample;\n"
+    "enum Color:byte { Red = 0, Green, Blue = 2 }\n"
+    "union Equipment { Weapon } // Optionally add more tables.\n"
+    "struct Vec3 {\n"
+    "  x:float;\n"
+    "  y:float;\n"
+    "  z:float;\n"
+    "}\n"
+    "table Monster {\n"
+    "  pos:Vec3; // Struct.\n"
+    "  mana:short = 150;\n"
+    "  hp:short = 100;\n"
+    "  name:string;\n"
+    "  friendly:bool = false (deprecated);\n"
+    "  inventory:[ubyte];  // Vector of scalars.\n"
+    "  color:Color = Blue; // Enum.\n"
+    "  weapons:[Weapon];   // Vector of tables.\n"
+    "  equipped:Equipment; // Union.\n"
+    "  path:[Vec3];        // Vector of structs.\n"
+    "}\n"
+    "table Weapon {\n"
+    "  name:string;\n"
+    "  damage:short;\n"
+    "}\n"
+    "root_type Monster;\n";
+  return ss.str();
+}
+
 std::string FlatCompiler::GetUsageString(const char *program_name) const {
   std::stringstream ss;
   ss << "Usage: " << program_name << " [OPTION]... FILE... [-- FILE...]\n";
@@ -151,6 +189,13 @@ std::string FlatCompiler::GetUsageString(const char *program_name) const {
     "                     force strings and vectors to empty rather than null.\n"
     "  --flexbuffers      Used with \"binary\" and \"json\" options, it generates\n"
     "                     data using schema-less FlexBuffers.\n"
+    "  --use-builtin-schema We make QC DLC schema as a built-in schema to hide \n"
+    "                     implementation details from users, specified this argument to\n"
+    "                     enable the built-in schema.\n"
+    "  --keep-weights     Specified this argument to serialize DLC model weights, \n"
+    "                     note that this argument takes effect only \n"
+    "                     if you specified --use-builtin-schema.\n"
+    "  --help             Print usage guide.\n"
     "FILEs may be schemas (must end in .fbs), binary schemas (must end in .bfbs),\n"
     "or JSON files (conforming to preceding schema). FILEs after the -- must be\n"
     "binary flatbuffer format files.\n"
@@ -174,6 +219,10 @@ int FlatCompiler::Compile(int argc, const char **argv) {
   bool raw_binary = false;
   bool schema_binary = false;
   bool grpc_enabled = false;
+  // use_builtin_schema and keep_weights are used for serialize QC flactbuffers
+  // to json text purpose
+  bool use_builtin_schema = false;
+  bool keep_weights = false;
   std::vector<std::string> filenames;
   std::list<std::string> include_directories_storage;
   std::vector<const char *> include_directories;
@@ -328,6 +377,13 @@ int FlatCompiler::Compile(int argc, const char **argv) {
         opts.java_primitive_has_method = true;
       } else if (arg == "--flexbuffers") {
         opts.use_flexbuffers = true;
+      } else if (arg == "--use-builtin-schema"){
+        use_builtin_schema = true;
+      } else if (arg == "--keep-weights") {
+        keep_weights = true;    
+      } else if (arg == "--help") {
+        printf("%s", GetUsageString("flatc").c_str());
+        return 0;
       } else {
         for (size_t i = 0; i < params_.num_generators; ++i) {
           if (arg == params_.generators[i].generator_opt_long ||
@@ -434,7 +490,12 @@ int FlatCompiler::Compile(int argc, const char **argv) {
           ParseFile(*parser.get(), filename, contents, include_directories);
         }
       } else {
-        ParseFile(*parser.get(), filename, contents, include_directories);
+        if (use_builtin_schema) {
+          std::string schema_contents = keep_weights ? GetParamsSchema() : GetModelSchema();
+          ParseFile(*parser.get(), filename, schema_contents, include_directories);
+        } else {
+          ParseFile(*parser.get(), filename, contents, include_directories);
+        }
         if (!opts.use_flexbuffers && !is_schema &&
             !parser->builder_.GetSize()) {
           // If a file doesn't end in .fbs, it must be json/binary. Ensure we
